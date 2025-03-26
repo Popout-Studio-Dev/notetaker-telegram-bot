@@ -1,6 +1,10 @@
+import mongoose, { Document } from 'mongoose';
 import TelegramBot from 'node-telegram-bot-api';
+import { CommandHandler } from './commands/commandHandler';
 import { config } from './config/config';
+import { IList } from './models/list';
 import { connectToDatabase } from './services/database';
+import { ListService } from './services/listService';
 import { MessageHandler } from './services/messageHandler';
 
 async function startBot() {
@@ -24,8 +28,10 @@ async function startBot() {
             await bot.setWebHook(config.WEBHOOK_URL);
         }
 
-        // Initialize message handler
+        // Initialize handlers
         const messageHandler = new MessageHandler(bot);
+        const commandHandler = new CommandHandler(bot);
+        const listService = new ListService();
 
         // Basic error handling
         bot.on('polling_error', (error) => {
@@ -45,24 +51,69 @@ async function startBot() {
             );
         });
 
-        // Handle text and audio messages
+        // Handle commands
         bot.on('message', async (msg) => {
             try {
-                // Ignore commands
-                if (msg.text?.startsWith('/')) return;
+                // Handle commands
+                if (msg.text?.startsWith('/')) {
+                    await commandHandler.handleCommand(msg);
+                    return;
+                }
 
-                const chatId = msg.chat.id;
-                await bot.sendMessage(chatId, '🔄 Processing your message...');
+                // Handle "done" replies for completing items
+                if (msg.reply_to_message) {
+                    const replyText = msg.text?.toLowerCase();
+                    if (replyText === 'done' || replyText === 'complete') {
+                        const originalMessage = msg.reply_to_message.text;
+                        if (!originalMessage) return;
 
+                        // Extract list title from the original message
+                        const titleMatch = originalMessage.match(
+                            /new \w+ list: "([^"]+)"/,
+                        );
+                        if (!titleMatch) return;
+
+                        const lists = await listService.getListsByUser(
+                            msg.from?.id || 0,
+                        );
+                        const list = lists.find(
+                            (l) => l.title === titleMatch[1],
+                        ) as (IList & Document) | undefined;
+
+                        if (
+                            !list ||
+                            !mongoose.Types.ObjectId.isValid(list._id)
+                        ) {
+                            await bot.sendMessage(
+                                msg.chat.id,
+                                "❌ Could not find the list you're trying to update.",
+                            );
+                            return;
+                        }
+
+                        // Mark all items as completed
+                        for (let i = 0; i < list.items.length; i++) {
+                            await listService.updateListItem(
+                                msg.from?.id || 0,
+                                list._id.toString(),
+                                i,
+                                { completed: true },
+                            );
+                        }
+
+                        await bot.sendMessage(
+                            msg.chat.id,
+                            '✅ Marked all items as completed!',
+                        );
+                        return;
+                    }
+                }
+
+                // Process regular messages
                 const processedMessage = await messageHandler.processMessage(
                     msg,
                 );
-
-                // For now, just echo back the processed content
-                await bot.sendMessage(
-                    chatId,
-                    `✅ Received your ${processedMessage.type} message:\n\n${processedMessage.content}`,
-                );
+                await bot.sendMessage(msg.chat.id, processedMessage.content);
             } catch (error) {
                 console.error('❌ Error handling message:', error);
                 await bot.sendMessage(

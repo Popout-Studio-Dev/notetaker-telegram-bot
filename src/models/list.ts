@@ -1,4 +1,4 @@
-import mongoose, { Document } from 'mongoose';
+import mongoose, { Document, Types } from 'mongoose';
 
 export type ListType = 'grocery' | 'todo' | 'reminder' | 'general';
 
@@ -11,6 +11,7 @@ export interface ListItem {
 }
 
 export interface IList extends Document {
+    _id: Types.ObjectId;
     userId: number;
     type: ListType;
     title: string;
