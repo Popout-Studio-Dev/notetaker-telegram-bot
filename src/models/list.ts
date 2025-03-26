@@ -27,7 +27,14 @@ const listItemSchema = new mongoose.Schema({
     quantity: { type: String },
     category: { type: String },
     completed: { type: Boolean, default: false },
-    dueDate: { type: Date },
+    dueDate: {
+        type: Date,
+        set: (v: string) => {
+            if (!v) return undefined;
+            const date = new Date(v);
+            return isNaN(date.getTime()) ? undefined : date;
+        },
+    },
 });
 
 const listSchema = new mongoose.Schema(

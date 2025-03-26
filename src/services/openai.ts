@@ -36,13 +36,52 @@ export async function extractListFromText(
     content: string,
 ): Promise<ExtractedList> {
     try {
+        const now = new Date();
+        const days = [
+            'Sunday',
+            'Monday',
+            'Tuesday',
+            'Wednesday',
+            'Thursday',
+            'Friday',
+            'Saturday',
+        ];
+        const currentDay = days[now.getDay()];
+
+        const systemPrompt = `You are a helpful assistant that extracts structured list information from user messages. 
+The list could be a grocery list, todo list, reminder list, or general list. 
+Extract the most appropriate list type based on the content.
+
+Today is ${currentDay}, ${now.toISOString().split('T')[0]}.
+For any dates mentioned in the text:
+1. For relative dates like "next month 1st", calculate the actual date
+2. For days of the week like "Tuesday", find the next occurrence from today
+3. Always return dates in YYYY-MM-DD format
+4. For times, append them to the date in the format YYYY-MM-DDTHH:mm:00.000Z
+
+Example transformations (assuming today is ${currentDay}, ${
+            now.toISOString().split('T')[0]
+        }):
+- "next month 1st" → "${
+            new Date(now.getFullYear(), now.getMonth() + 1, 1)
+                .toISOString()
+                .split('T')[0]
+        }"
+- "next Tuesday at 2pm" → Find the next Tuesday after today and return as "YYYY-MM-DDTHH:mm:00.000Z"
+- "tomorrow" → "${
+            new Date(now.getTime() + 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split('T')[0]
+        }"
+
+Remember to calculate the correct next occurrence of any day of the week, considering today is ${currentDay}.`;
+
         const response = await openai.chat.completions.create({
             model: 'gpt-4',
             messages: [
                 {
                     role: 'system',
-                    content:
-                        'You are a helpful assistant that extracts structured list information from user messages. The list could be a grocery list, todo list, reminder list, or general list. Extract the most appropriate list type based on the content.',
+                    content: systemPrompt,
                 },
                 {
                     role: 'user',
@@ -94,7 +133,7 @@ export async function extractListFromText(
                                         dueDate: {
                                             type: 'string',
                                             description:
-                                                'The due date for the item (if applicable), in ISO format',
+                                                'The due date for the item in YYYY-MM-DD format, or YYYY-MM-DDTHH:mm:00.000Z if time is specified',
                                         },
                                     },
                                     required: ['name'],
@@ -113,6 +152,8 @@ export async function extractListFromText(
             throw new Error('No function call in response');
         }
 
+        console.log('systemPrompt', systemPrompt);
+        console.log('functionCall', JSON.stringify(functionCall, null, 2));
         return JSON.parse(functionCall.arguments) as ExtractedList;
     } catch (error) {
         console.error('❌ Error extracting list from text:', error);
