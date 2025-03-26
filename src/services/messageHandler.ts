@@ -1,24 +1,65 @@
 import TelegramBot, { Message } from 'node-telegram-bot-api';
 import { MessageType, ProcessedMessage } from '../types/message';
 import { deleteTempFile, saveTempFile } from '../utils/file';
-import { transcribeAudio } from './openai';
+import { ListService } from './listService';
+import { extractListFromText, transcribeAudio } from './openai';
 
 export class MessageHandler {
     private bot: TelegramBot;
+    private listService: ListService;
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
+        this.listService = new ListService();
     }
 
     async processMessage(message: Message): Promise<ProcessedMessage> {
         try {
+            let processedMessage: ProcessedMessage;
+
             if (message.text) {
-                return this.processTextMessage(message);
+                processedMessage = this.processTextMessage(message);
             } else if (message.voice || message.audio) {
-                return this.processAudioMessage(message);
+                processedMessage = await this.processAudioMessage(message);
             } else {
                 throw new Error('Unsupported message type');
             }
+
+            // Extract and store list if present
+            try {
+                const extractedList = await extractListFromText(
+                    processedMessage.content,
+                );
+                const list = await this.listService.createList(
+                    processedMessage.userId,
+                    extractedList.type,
+                    extractedList.title,
+                    extractedList.items,
+                    processedMessage.type === 'text' ? 'text' : 'voice',
+                    processedMessage.content,
+                );
+
+                // Add list information to the processed message
+                processedMessage.content = `✅ I've created a new ${
+                    list.type
+                } list: "${list.title}"\n\nItems:\n${list.items
+                    .map((item, index) => {
+                        let itemText = `${index + 1}. ${item.name}`;
+                        if (item.quantity) itemText += ` (${item.quantity})`;
+                        if (item.category) itemText += ` [${item.category}]`;
+                        if (item.dueDate)
+                            itemText += ` - Due: ${new Date(
+                                item.dueDate,
+                            ).toLocaleDateString()}`;
+                        return itemText;
+                    })
+                    .join('\n')}`;
+            } catch (error) {
+                console.error('Failed to extract list from message:', error);
+                // If list extraction fails, return the original processed message
+            }
+
+            return processedMessage;
         } catch (error) {
             console.error('❌ Error processing message:', error);
             throw error;
