@@ -1,5 +1,9 @@
 import TelegramBot, { Message } from 'node-telegram-bot-api';
 import { MessageType, ProcessedMessage } from '../types/message';
+import {
+    formatDateTimeForDisplay,
+    getCurrentTimezone,
+} from '../utils/dateTime';
 import { deleteTempFile, saveTempFile } from '../utils/file';
 import { ListService } from './listService';
 import { extractListFromText, transcribeAudio } from './openai';
@@ -47,25 +51,11 @@ export class MessageHandler {
                         let itemText = `${index + 1}. ${item.name}`;
                         if (item.quantity) itemText += ` (${item.quantity})`;
                         if (item.category) itemText += ` [${item.category}]`;
-                        if (item.dueDate) {
-                            const date = new Date(item.dueDate);
-                            const dateStr = date.toLocaleDateString();
-
-                            // If it's a reminder and has a time component
-                            if (
-                                list.type === 'reminder' &&
-                                (date.getHours() !== 0 ||
-                                    date.getMinutes() !== 0)
-                            ) {
-                                const timeStr = date.toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: true,
-                                });
-                                itemText += ` - Due: ${dateStr} at ${timeStr}`;
-                            } else {
-                                itemText += ` - Due: ${dateStr}`;
-                            }
+                        if (item.dueDate && list.type === 'reminder') {
+                            itemText += ` - Due: ${formatDateTimeForDisplay(
+                                new Date(item.dueDate),
+                                getCurrentTimezone(),
+                            )}`;
                         }
                         return itemText;
                     })

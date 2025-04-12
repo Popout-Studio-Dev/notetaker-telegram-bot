@@ -1,6 +1,10 @@
 import TelegramBot, { Message } from 'node-telegram-bot-api';
 import { IList, ListType } from '../models/list';
 import { ListService } from '../services/listService';
+import {
+    formatDateTimeForDisplay,
+    getCurrentTimezone,
+} from '../utils/dateTime';
 
 export class CommandHandler {
     private bot: TelegramBot;
@@ -45,13 +49,13 @@ export class CommandHandler {
                     await this.handleToday(chatId, userId);
                     break;
                 case '/grocery':
-                    await this.handleListByType(chatId, userId, 'grocery');
+                    await this.handleListByType(chatId, 'grocery');
                     break;
                 case '/todo':
-                    await this.handleListByType(chatId, userId, 'todo');
+                    await this.handleListByType(chatId, 'todo');
                     break;
                 case '/reminder':
-                    await this.handleListByType(chatId, userId, 'reminder');
+                    await this.handleListByType(chatId, 'reminder');
                     break;
                 case '/delete':
                     await this.handleDelete(message);
@@ -181,65 +185,59 @@ export class CommandHandler {
 
     private async handleListByType(
         chatId: number,
-        userId: number,
-        type: ListType,
+        type: string,
     ): Promise<void> {
-        const lists = await this.listService.getListsByType(userId, type);
-        if (lists.length === 0) {
-            await this.bot.sendMessage(
+        try {
+            const lists = await this.listService.getListsByType(
                 chatId,
-                `You don't have any ${type} lists yet.`,
+                type as ListType,
             );
-            return;
-        }
 
-        const message =
-            `Your ${type} lists:\n\n` +
-            lists
-                .map((list, index) => {
-                    return (
-                        `${index + 1}. ${list.title}\n` +
-                        list.items
-                            .map((item, itemIndex) => {
-                                let itemText = `   ${itemIndex + 1}. ${
-                                    item.name
-                                }`;
-                                if (item.quantity)
-                                    itemText += ` (${item.quantity})`;
-                                if (item.category)
-                                    itemText += ` [${item.category}]`;
-                                if (item.dueDate) {
-                                    const date = new Date(item.dueDate);
-                                    const dateStr = date.toLocaleDateString();
+            if (!lists || lists.length === 0) {
+                await this.bot.sendMessage(
+                    chatId,
+                    `No ${type} lists found. Create one by sending me a message!`,
+                );
+                return;
+            }
 
-                                    // If it's a reminder and has a time component (hours or minutes are set)
-                                    if (
-                                        type === 'reminder' &&
-                                        (date.getHours() !== 0 ||
-                                            date.getMinutes() !== 0)
-                                    ) {
-                                        const timeStr = date.toLocaleTimeString(
-                                            [],
-                                            {
-                                                hour: '2-digit',
-                                                minute: '2-digit',
-                                                hour12: true,
-                                            },
-                                        );
-                                        itemText += ` - Due: ${dateStr} at ${timeStr}`;
-                                    } else {
-                                        itemText += ` - Due: ${dateStr}`;
-                                    }
-                                }
-                                if (item.completed) itemText += ' ✅';
-                                return itemText;
-                            })
-                            .join('\n')
-                    );
+            const timezone = getCurrentTimezone();
+            const listsText = lists
+                .map((list) => {
+                    let listText = `📝 "${list.title}"\n`;
+                    listText += list.items
+                        .map((item) => {
+                            let itemText = `- ${item.name}`;
+                            if (item.quantity) {
+                                itemText += ` (${item.quantity})`;
+                            }
+                            if (item.category) {
+                                itemText += ` [${item.category}]`;
+                            }
+                            if (item.dueDate && type === 'reminder') {
+                                itemText += ` - Due: ${formatDateTimeForDisplay(
+                                    new Date(item.dueDate),
+                                    timezone,
+                                )}`;
+                            }
+                            return itemText;
+                        })
+                        .join('\n');
+                    return listText;
                 })
                 .join('\n\n');
 
-        await this.bot.sendMessage(chatId, message);
+            await this.bot.sendMessage(
+                chatId,
+                `Your ${type} lists:\n\n${listsText}`,
+            );
+        } catch (error) {
+            console.error(`❌ Error handling /${type} command:`, error);
+            await this.bot.sendMessage(
+                chatId,
+                '❌ Sorry, I had trouble retrieving your lists. Please try again.',
+            );
+        }
     }
 
     private async handleDelete(message: Message): Promise<void> {

@@ -2,6 +2,7 @@ import fs from 'fs';
 import OpenAI from 'openai';
 import { config } from '../config/config';
 import { ListType } from '../models/list';
+import { getCurrentTimezone } from '../utils/dateTime';
 
 const openai = new OpenAI({
     apiKey: config.OPENAI_API_KEY,
@@ -37,6 +38,7 @@ export async function extractListFromText(
 ): Promise<ExtractedList> {
     try {
         const now = new Date();
+        const timezone = getCurrentTimezone();
         const days = [
             'Sunday',
             'Monday',
@@ -52,29 +54,30 @@ export async function extractListFromText(
 The list could be a grocery list, todo list, reminder list, or general list. 
 Extract the most appropriate list type based on the content.
 
-Today is ${currentDay}, ${now.toISOString().split('T')[0]}.
+Current context:
+- Today is ${currentDay}, ${now.toISOString()}
+- User's timezone: ${timezone}
+
 For any dates mentioned in the text:
 1. For relative dates like "next month 1st", calculate the actual date
 2. For days of the week like "Tuesday", find the next occurrence from today
-3. Always return dates in YYYY-MM-DD format
-4. For times, append them to the date in the format YYYY-MM-DDTHH:mm:00.000Z
+3. Always return dates in ISO format (YYYY-MM-DDTHH:mm:ss.sssZ)
+4. All times should be converted to UTC before returning
+5. When a specific time is not provided, use 00:00:00.000Z (UTC midnight)
 
-Example transformations (assuming today is ${currentDay}, ${
-            now.toISOString().split('T')[0]
-        }):
-- "next month 1st" → "${
-            new Date(now.getFullYear(), now.getMonth() + 1, 1)
-                .toISOString()
-                .split('T')[0]
-        }"
-- "next Tuesday at 2pm" → Find the next Tuesday after today and return as "YYYY-MM-DDTHH:mm:00.000Z"
-- "tomorrow" → "${
-            new Date(now.getTime() + 24 * 60 * 60 * 1000)
-                .toISOString()
-                .split('T')[0]
-        }"
+Example transformations (assuming today is ${currentDay}, ${now.toISOString()}):
+- "next month 1st" → "${new Date(
+            now.getFullYear(),
+            now.getMonth() + 1,
+            1,
+        ).toISOString()}"
+- "next Tuesday at 2pm" → Calculate next Tuesday and convert local 2pm to UTC
+- "tomorrow" → "${new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()}"
 
-Remember to calculate the correct next occurrence of any day of the week, considering today is ${currentDay}.`;
+Remember:
+- Always convert user's local time to UTC before returning
+- The user is in timezone: ${timezone}
+- Include the full ISO string with milliseconds and Z suffix`;
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4',
@@ -133,7 +136,7 @@ Remember to calculate the correct next occurrence of any day of the week, consid
                                         dueDate: {
                                             type: 'string',
                                             description:
-                                                'The due date for the item in YYYY-MM-DD format, or YYYY-MM-DDTHH:mm:00.000Z if time is specified',
+                                                'The due date for the item in ISO format (YYYY-MM-DDTHH:mm:ss.sssZ). Must be in UTC.',
                                         },
                                     },
                                     required: ['name'],
@@ -152,8 +155,6 @@ Remember to calculate the correct next occurrence of any day of the week, consid
             throw new Error('No function call in response');
         }
 
-        console.log('systemPrompt', systemPrompt);
-        console.log('functionCall', JSON.stringify(functionCall, null, 2));
         return JSON.parse(functionCall.arguments) as ExtractedList;
     } catch (error) {
         console.error('❌ Error extracting list from text:', error);
